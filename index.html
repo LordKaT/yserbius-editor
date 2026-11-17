@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Shadow of Yserbius — MYCHARS.DAT Save Editor</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./data.js"></script>
+  <script defer src="./cipher.js"></script>
+  <script defer src="./fields.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <h1>Shadow of Yserbius — MYCHARS.DAT Character Save Editor</h1>
+      <p class="privacy-banner" role="status">
+        <strong>100% client-side:</strong> All cipher table extraction, decryption, editing, verification, and encryption run locally in your browser. Your files never leave your machine and no network requests are made.
+      </p>
+    </header>
+
+    <main>
+      <!-- 1. File Loader -->
+      <section id="files-section" class="card" aria-labelledby="files-heading">
+        <h2 id="files-heading">1. Load YSBOX.EXE &amp; MYCHARS.DAT</h2>
+        <div id="global-error-banner" class="alert alert-error hidden" role="alert"></div>
+
+        <div class="upload-grid">
+          <div id="exe-dropzone" class="dropzone">
+            <div class="dropzone-title">Game Executable (<code>YSBOX.EXE</code>)</div>
+            <label for="exe-input">Select or drop your <code>YSBOX.EXE</code> (reads permutation &amp; scramble lookup tables only):</label>
+            <div class="file-actions-row">
+              <input id="exe-input" type="file" accept=".exe,.EXE">
+            </div>
+            <div id="exe-status" class="alert alert-info">Waiting for <code>YSBOX.EXE</code>…</div>
+          </div>
+
+          <div id="dat-dropzone" class="dropzone">
+            <div class="dropzone-title">Save File (<code>MYCHARS.DAT</code>)</div>
+            <label for="dat-input">Select or drop your 3,076-byte <code>MYCHARS.DAT</code>:</label>
+            <div class="file-actions-row">
+              <input id="dat-input" type="file" accept=".dat,.DAT">
+              <button id="open-handle-btn" type="button" class="btn-small hidden">
+                Open with Overwrite Access…
+              </button>
+            </div>
+            <div id="dat-status" class="alert alert-info">Waiting for <code>MYCHARS.DAT</code>…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Workspace shown once both files are loaded and decrypted -->
+      <div id="workspace" class="hidden">
+        <!-- 2. Slots Overview -->
+        <section id="slots-section" class="card" aria-labelledby="slots-heading">
+          <div class="toolbar-controls">
+            <h2 id="slots-heading" style="border:none;margin:0;padding:0;">2. Character Slots (6 slots)</h2>
+            <div id="header-info" class="badge-row"></div>
+          </div>
+          <p class="field-note">
+            Pick a slot to edit. You can modify multiple slots and export one combined <code>Mychars.dat</code>. Header bytes (<code>0x00..0x3F</code>) are copied through unchanged.
+          </p>
+          <div id="slots-grid" class="slots-grid"></div>
+        </section>
+
+        <!-- Sticky Toolbar -->
+        <nav class="sticky-toolbar" aria-label="Editor Controls and Section Navigation">
+          <div class="toolbar-controls">
+            <div class="toolbar-group">
+              <span id="active-slot-banner" style="font-weight:700;"></span>
+              <button id="revert-slot-btn" type="button" class="btn-small">Revert Active Slot</button>
+              <button id="revert-all-btn" type="button" class="btn-small">Revert All Slots</button>
+            </div>
+
+            <div class="toolbar-group">
+              <span style="font-weight:600;">Global View Mode:</span>
+              <button id="global-mode-rep" type="button" class="btn-small btn-primary" aria-pressed="true">
+                Representational
+              </button>
+              <button id="global-mode-raw" type="button" class="btn-small" aria-pressed="false">
+                Numeric (Raw)
+              </button>
+
+              <button id="advanced-mode-btn" type="button" class="btn-small" aria-pressed="false">
+                Advanced Mode: OFF (Locked fields read-only)
+              </button>
+            </div>
+          </div>
+
+          <div class="nav-links">
+            <a href="#sec-identity">Identity</a>
+            <a href="#sec-appearance">Appearance</a>
+            <a href="#sec-attributes">Attributes</a>
+            <a href="#sec-points-wealth">Points &amp; Wealth</a>
+            <a href="#sec-position">Position</a>
+            <a href="#sec-items">Items (32)</a>
+            <a href="#sec-skills-spells">Skills (24) &amp; Spells (24)</a>
+            <a href="#sec-unknown">Unknown / Raw</a>
+            <a href="#sec-export">Diff &amp; Export <span id="nav-diff-count" class="badge">0 bytes</span></a>
+          </div>
+        </nav>
+
+        <!-- Identity -->
+        <section id="sec-identity" class="card" aria-labelledby="heading-identity">
+          <h2 id="heading-identity">Identity</h2>
+          <div id="fields-identity" class="fields-grid"></div>
+        </section>
+
+        <!-- Appearance -->
+        <section id="sec-appearance" class="card" aria-labelledby="heading-appearance">
+          <h2 id="heading-appearance">Appearance</h2>
+          <div class="alert alert-info">
+            <strong>Option names &amp; valid maxima are unknown:</strong> These 6 bytes are shown as numbers. In an earlier test, the game forced a veil byte when values were out of range, so do not assume any specific maximum.
+          </div>
+          <div id="fields-appearance" class="fields-grid"></div>
+        </section>
+
+        <!-- Attributes -->
+        <section id="sec-attributes" class="card" aria-labelledby="heading-attributes">
+          <h2 id="heading-attributes">Attributes &amp; Health / Mana</h2>
+          <div class="alert alert-info">
+            The game does <strong>not</strong> recompute Max Health / Max Mana when attributes change, and does not validate stats on load. Current Health / Current Mana only survive if you resume from the <strong>LOWER volcano entrance</strong>.
+          </div>
+          <div id="fields-attributes" class="fields-grid"></div>
+        </section>
+
+        <!-- Points & Wealth -->
+        <section id="sec-points-wealth" class="card" aria-labelledby="heading-points-wealth">
+          <h2 id="heading-points-wealth">Points Remaining &amp; Wealth</h2>
+          <div class="alert alert-info">
+            Experience needed per level is <strong>unknown</strong>, and changing experience does not auto-level a character. High words at <code>0x9D</code> (gold_hi) and <code>0xA1</code> (exp_hi) are unknown and zero in every observed save; kept read-only unless explicitly unlocked below.
+          </div>
+          <div class="file-actions-row" style="margin-bottom:0.75rem;">
+            <input id="unlock-wealth-hi-chk" type="checkbox">
+            <label for="unlock-wealth-hi-chk">Allow editing unknown high words (<code>gold_hi</code> 0x9D, <code>exp_hi</code> 0xA1)</label>
+          </div>
+          <div id="fields-points-wealth" class="fields-grid"></div>
+        </section>
+
+        <!-- Position -->
+        <section id="sec-position" class="card" aria-labelledby="heading-position">
+          <h2 id="heading-position">Dungeon Position</h2>
+          <div class="alert alert-warn">
+            <strong>Important:</strong> Saved position only survives when resuming from the <strong>LOWER volcano entrance</strong> (top entrance resets position and heals fully). The game does not check walls when placing your character, so an invalid cell can put you inside rock.
+          </div>
+          <div id="fields-position-scalars" class="fields-grid" style="margin-bottom:1rem;"></div>
+          <div id="position-visual-helpers" class="position-layout"></div>
+        </section>
+
+        <!-- Items -->
+        <section id="sec-items" class="card" aria-labelledby="heading-items">
+          <h2 id="heading-items">Inventory, Equipment, Quest &amp; Ground Items (32 Slots)</h2>
+          <div class="items-toolbar">
+            <p class="field-note" style="margin:0;">
+              Item type names are guesses (<code>type_guess</code>). Item prices are <strong>unknown</strong> and not shown. Guild restriction badges are informational only (the game loads mismatched items fine). Note: Mana Potion / Elixir / Restore (ids 206–208) have raw skill byte 24 (out of skill range 0..23) and have no skill link.
+            </p>
+            <div class="toolbar-group">
+              <input id="allow-unused-items-chk" type="checkbox">
+              <label for="allow-unused-items-chk">Allow editing unused slots 10–14 (cleared by game on save)</label>
+            </div>
+          </div>
+
+          <search class="card" style="padding:0.7rem;margin-bottom:0.85rem;background:var(--bg-subtle);">
+            <form id="inline-item-search-form">
+              <div class="toolbar-controls">
+                <div class="toolbar-group" style="flex:1 1 280px;">
+                  <label for="inline-item-search" style="font-weight:700;">Quick Item Lookup (256 items):</label>
+                  <input id="inline-item-search" type="search" placeholder="Search by name, id, guild, skill, or spell (e.g. Battle Axe)…" style="flex:1 1 220px;" autocorrect="off" autocapitalize="none" spellcheck="false">
+                </div>
+                <span id="inline-item-search-count" class="field-note"></span>
+              </div>
+              <div id="inline-item-search-results" class="item-search-results hidden"></div>
+            </form>
+          </search>
+
+          <div id="items-container"></div>
+        </section>
+
+        <!-- Skills & Spells -->
+        <section id="sec-skills-spells" class="card" aria-labelledby="heading-skills-spells">
+          <div class="toolbar-controls" style="border-bottom:1px solid var(--border);padding-bottom:0.4rem;margin-bottom:0.75rem;">
+            <h2 id="heading-skills-spells" style="border:none;margin:0;padding:0;">Spells (24) &amp; Skills (24)</h2>
+            <button id="regroup-skills-spells-btn" type="button" class="btn-small">
+              Re-group (Levels &gt; 0 First)
+            </button>
+          </div>
+          <div class="alert alert-info">
+            Which guild may learn/raise each skill or spell and maximum level caps are <strong>unknown</strong>; no invented rules are enforced.
+          </div>
+          <div class="dual-columns">
+            <div id="skills-panel"></div>
+            <div id="spells-panel"></div>
+          </div>
+        </section>
+
+        <!-- Unknown / Raw -->
+        <section id="sec-unknown" class="card" aria-labelledby="heading-unknown">
+          <h2 id="heading-unknown">Unknown &amp; Locked Fields / Raw Hex Inspector</h2>
+          <p class="field-note">
+            Every byte in <code>0xF6..0x1D5</code> (except validity flags <code>0x17D</code> and <code>0x1AB</code>) is unknown and copied through untouched.
+          </p>
+          <div id="fields-unknown" class="fields-grid" style="margin-bottom:0.9rem;"></div>
+
+          <details open>
+            <summary style="font-weight:700;cursor:pointer;">Unknown block <code>0xF6..0x1D5</code> (224 bytes; validity flags <code>0x17D</code> &amp; <code>0x1AB</code> highlighted)</summary>
+            <div id="unkf6-hex" class="hex-dump" style="margin-top:0.5rem;"></div>
+          </details>
+
+          <details style="margin-top:0.75rem;">
+            <summary style="font-weight:700;cursor:pointer;">Full 502-byte decrypted record hex dump</summary>
+            <div id="full-record-hex" class="hex-dump" style="margin-top:0.5rem;"></div>
+          </details>
+        </section>
+
+        <!-- Diff & Export -->
+        <section id="sec-export" class="card" aria-labelledby="heading-export">
+          <h2 id="heading-export">Diff Review, Verification &amp; Download</h2>
+
+          <div class="export-actions" style="margin-bottom:0.85rem;">
+            <button id="review-diff-btn" type="button" class="btn-primary">
+              Review Diff &amp; Self-Check Output
+            </button>
+            <span id="review-status-pill" class="badge badge-caution">
+              Review required before download
+            </span>
+          </div>
+
+          <div id="diff-panel" class="hidden" aria-live="polite">
+            <div id="self-check-banner" class="alert"></div>
+            <div id="diff-summary-content"></div>
+          </div>
+
+          <div class="reminders-box" role="note" aria-label="Safety reminders before saving">
+            <strong>Before replacing your game file, remember:</strong>
+            <ol>
+              <li><strong>Back up</strong> your original <code>MYCHARS.DAT</code> file first.</li>
+              <li><strong>Exit Shadow of Yserbius to DOS</strong> before replacing the file — the game rewrites <code>MYCHARS.DAT</code> when it exits.</li>
+              <li>Current health/mana and position only survive when you resume from the <strong>LOWER volcano entrance</strong> (the top entrance heals you and resets your position).</li>
+            </ol>
+          </div>
+
+          <div class="export-actions">
+            <button id="download-btn" type="button" class="btn-primary" disabled>
+              Download Mychars.dat
+            </button>
+            <button id="overwrite-btn" type="button" class="hidden" disabled>
+              Save Over Opened File…
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Dialog 1: EXE Fingerprint Mismatch Confirmation -->
+  <dialog id="exe-mismatch-dialog" aria-labelledby="exe-mismatch-title" closedby="closerequest">
+    <h2 id="exe-mismatch-title">Warning: Unrecognized YSBOX.EXE Tables</h2>
+    <p>
+      The lookup table SHA-1 fingerprints in your <code>YSBOX.EXE</code> do not match the tested 345,952-byte executable.
+    </p>
+    <div id="exe-mismatch-details" class="hex-dump" style="margin-bottom:0.75rem;"></div>
+    <p>
+      Continuing with mismatched tables can corrupt decrypted records or produce files the game cannot load. Only the tested version has been verified.
+    </p>
+    <form method="dialog" class="dialog-actions">
+      <button type="submit" value="cancel" autofocus>Cancel &amp; Reject EXE</button>
+      <button type="submit" value="confirm" class="btn-danger">Continue Anyway (Unverified EXE)</button>
+    </form>
+  </dialog>
+
+  <!-- Dialog 2: Advanced Mode Unlock Confirmation -->
+  <dialog id="advanced-mode-dialog" aria-labelledby="advanced-dialog-title" closedby="closerequest">
+    <h2 id="advanced-dialog-title">Enable Advanced Mode (Locked Fields)</h2>
+    <div class="alert alert-error">
+      <strong>Experiment 7 Warning:</strong> In an earlier experiment, editing the map number (<code>0xF2</code>) together with other position bytes (<code>0xF3</code>, <code>0xF4</code>) caused the game to stop with <code>ERROR!: illegal map code!</code>. Editing validity flags (<code>0x17D</code>, <code>0x1AB</code>) or prefix words (<code>0x06</code>) can also make a save unloadable.
+    </div>
+    <form id="advanced-mode-form">
+      <div style="margin-bottom:0.75rem;">
+        <input id="adv-ack-checkbox" type="checkbox" required>
+        <label for="adv-ack-checkbox">I understand that editing locked bytes caused <code>ERROR!: illegal map code!</code> and can break my save.</label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.3rem;">
+        <label for="adv-confirm-input">Type <code>illegal map code</code> to unlock <code>risk: locked</code> fields:</label>
+        <input id="adv-confirm-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="illegal map code" required>
+      </div>
+      <div id="adv-dialog-error" class="field-error-note hidden" style="margin-top:0.5rem;"></div>
+      <div class="dialog-actions">
+        <button id="adv-cancel-btn" type="button" autofocus>Keep Locked</button>
+        <button type="submit" class="btn-danger">Unlock Locked Fields</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog 3: Searchable 256-Entry Item Picker -->
+  <dialog id="item-picker-dialog" aria-labelledby="item-picker-title" closedby="any">
+    <h2 id="item-picker-title">Select Item for <span id="item-picker-slot-label"></span></h2>
+    <search>
+      <label for="item-picker-search">Filter all 256 items by name, ID, type, guild, skill, or spell:</label>
+      <input id="item-picker-search" type="search" style="width:100%;margin-top:0.35rem;" placeholder="Type e.g. Battle Axe, 19, Fencing, Wizard…" autofocus autocorrect="off" autocapitalize="none" spellcheck="false">
+    </search>
+    <div id="item-picker-count" class="field-note" style="margin-top:0.4rem;"></div>
+    <ul id="item-picker-list" class="picker-list"></ul>
+    <form method="dialog" class="dialog-actions">
+      <button type="submit" value="cancel">Close</button>
+    </form>
+  </dialog>
+
+  <!-- Dialog 4: File System Access API Overwrite Confirmation -->
+  <dialog id="overwrite-confirm-dialog" aria-labelledby="overwrite-title" closedby="closerequest">
+    <h2 id="overwrite-title">Confirm Overwriting Opened File</h2>
+    <p>You are about to overwrite <strong id="overwrite-filename"></strong> directly on disk.</p>
+    <div class="reminders-box">
+      <ol>
+        <li>Have you <strong>backed up</strong> your original <code>MYCHARS.DAT</code> first?</li>
+        <li>Have you <strong>exited Shadow of Yserbius to DOS</strong>? (The game overwrites <code>MYCHARS.DAT</code> on exit.)</li>
+        <li>Remember to resume from the <strong>LOWER volcano entrance</strong> to keep HP/Mana and position.</li>
+      </ol>
+    </div>
+    <form method="dialog" class="dialog-actions">
+      <button type="submit" value="cancel" autofocus>Cancel</button>
+      <button type="submit" value="overwrite" class="btn-danger">Overwrite File Now</button>
+    </form>
+  </dialog>
+</body>
+</html>
